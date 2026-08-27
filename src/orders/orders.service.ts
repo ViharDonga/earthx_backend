@@ -5,9 +5,10 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
-import { Order, OrderStatus } from './entities/order.entity';
+import { Order } from './entities/order.entity';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
+import { ReorderOrdersDto } from './dto/reorder-orders.dto';
 
 @Injectable()
 export class OrdersService {
@@ -19,20 +20,38 @@ export class OrdersService {
 
   async create(createOrderDto: CreateOrderDto): Promise<Order> {
     const processName = createOrderDto.process || 'General';
-    const targetRank = createOrderDto.rank || 1;
 
-    // Use transaction to adjust existing ranks and insert new order
+    // Use transaction to adjust existing ranks or append to the end
     return await this.dataSource.transaction(async (manager) => {
-      // Shift existing orders in the same process with rank >= targetRank by +1
-      await manager
-        .createQueryBuilder()
-        .update(Order)
-        .set({ rank: () => '`rank` + 1' })
-        .where('process = :process AND rank >= :targetRank', {
-          process: processName,
-          targetRank,
-        })
-        .execute();
+      let targetRank = createOrderDto.rank;
+
+      if (targetRank !== undefined && targetRank !== null && targetRank > 0) {
+        // Shift existing orders in the same process with rank >= targetRank by +1
+        await manager
+          .createQueryBuilder()
+          .update(Order)
+          .set({ rank: () => '`rank` + 1' })
+          .where(
+            '(process = :process OR (:process = \'General\' AND (process IS NULL OR process = \'\'))) AND rank >= :targetRank',
+            {
+              process: processName,
+              targetRank,
+            },
+          )
+          .execute();
+      } else {
+        // Calculate max rank + 1 for auto-incrementing order
+        const maxRankResult = await manager
+          .createQueryBuilder(Order, 'order')
+          .where(
+            'order.process = :process OR (:process = \'General\' AND (order.process IS NULL OR order.process = \'\'))',
+            { process: processName },
+          )
+          .select('MAX(order.rank)', 'max')
+          .getRawOne();
+
+        targetRank = (Number(maxRankResult?.max) || 0) + 1;
+      }
 
       const order = manager.create(Order, {
         ...createOrderDto,
@@ -48,7 +67,7 @@ export class OrdersService {
     companyId?: number,
     productId?: number,
     process?: string,
-    status?: OrderStatus,
+    order_status?: string,
   ): Promise<Order[]> {
     const query = this.ordersRepository.createQueryBuilder('order')
       .leftJoinAndSelect('order.company', 'company')
@@ -66,8 +85,10 @@ export class OrdersService {
       query.andWhere('order.process = :process', { process });
     }
 
-    if (status) {
-      query.andWhere('order.status = :status', { status });
+    
+
+    if (order_status) {
+      query.andWhere('order.order_status = :order_status', { order_status });
     }
 
     return await query
@@ -89,8 +110,113 @@ export class OrdersService {
   }
 
   /**
-   * Update an order's rank and re-shift all affected orders in the same process
-   * Example: Changing order from rank 6 to rank 1 will shift ranks 1..5 to 2..6.
+   * Move an order up by swapping rank with the immediately previous order in the same scope
+   */
+  async moveUp(id: number): Promise<Order[]> {
+    const currentOrder = await this.findOne(id);
+    const processName = currentOrder.process || 'General';
+
+    // Find the immediately previous record in the same scope (rank < current.rank)
+    const previousOrder = await this.ordersRepository
+      .createQueryBuilder('order')
+      .where(
+        '(order.process = :process OR (:process = \'General\' AND (order.process IS NULL OR order.process = \'\')))',
+        { process: processName },
+      )
+      .andWhere('order.rank < :currentRank', { currentRank: currentOrder.rank })
+      .andWhere("(order.order_status = 'OPEN' OR order.order_status IS NULL)")
+      .orderBy('order.rank', 'DESC')
+      .addOrderBy('order.id', 'DESC')
+      .getOne();
+
+    // If already first, return current ordered list without error
+    if (!previousOrder) {
+      return this.findAll(undefined, undefined, processName);
+    }
+
+    // Safe swap inside transaction using temporary rank (0) to avoid index collisions
+    await this.dataSource.transaction(async (manager) => {
+      const currentRank = currentOrder.rank;
+      const prevRank = previousOrder.rank;
+
+      await manager.update(Order, currentOrder.id, { rank: 0 });
+      await manager.update(Order, previousOrder.id, { rank: currentRank });
+      await manager.update(Order, currentOrder.id, { rank: prevRank });
+    });
+
+    return this.findAll(undefined, undefined, processName);
+  }
+
+  /**
+   * Move an order down by swapping rank with the immediately next order in the same scope
+   */
+  async moveDown(id: number): Promise<Order[]> {
+    const currentOrder = await this.findOne(id);
+    const processName = currentOrder.process || 'General';
+
+    // Find the immediately next record in the same scope (rank > current.rank)
+    const nextOrder = await this.ordersRepository
+      .createQueryBuilder('order')
+      .where(
+        '(order.process = :process OR (:process = \'General\' AND (order.process IS NULL OR order.process = \'\')))',
+        { process: processName },
+      )
+      .andWhere('order.rank > :currentRank', { currentRank: currentOrder.rank })
+      .andWhere("(order.order_status = 'OPEN' OR order.order_status IS NULL)")
+      .orderBy('order.rank', 'ASC')
+      .addOrderBy('order.id', 'ASC')
+      .getOne();
+
+    // If already last, return current ordered list without error
+    if (!nextOrder) {
+      return this.findAll(undefined, undefined, processName);
+    }
+
+    // Safe swap inside transaction using temporary rank (0)
+    await this.dataSource.transaction(async (manager) => {
+      const currentRank = currentOrder.rank;
+      const nextRank = nextOrder.rank;
+
+      await manager.update(Order, currentOrder.id, { rank: 0 });
+      await manager.update(Order, nextOrder.id, { rank: currentRank });
+      await manager.update(Order, currentOrder.id, { rank: nextRank });
+    });
+
+    return this.findAll(undefined, undefined, processName);
+  }
+
+  /**
+   * Batch reorder multiple orders in one single transaction
+   */
+  async reorder(reorderOrdersDto: ReorderOrdersDto): Promise<Order[]> {
+    const { items } = reorderOrdersDto;
+    if (!items || items.length === 0) {
+      throw new BadRequestException('Items array must not be empty');
+    }
+
+    const ids = items.map((item) => item.id);
+    const uniqueIds = new Set(ids);
+    if (uniqueIds.size !== ids.length) {
+      throw new BadRequestException('Duplicate order IDs in reorder request');
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      // Step 1: Use temporary negative ranks to avoid unique constraint collisions
+      for (const item of items) {
+        await manager.update(Order, item.id, { rank: -item.rank });
+      }
+      // Step 2: Assign target ranks
+      for (const item of items) {
+        await manager.update(Order, item.id, { rank: item.rank });
+      }
+    });
+
+    return this.findAll();
+  }
+
+  /**
+   * Update an order's rank and re-shift all affected orders cleanly in sequential order.
+   * Example: Moving order 8 to rank 3 shifts rank 3..7 to 4..8 and assigns 3 to target order.
    */
   async updateRank(id: number, newRank: number): Promise<Order[]> {
     if (newRank < 1) {
@@ -98,50 +224,43 @@ export class OrdersService {
     }
 
     const targetOrder = await this.findOne(id);
-    const oldRank = targetOrder.rank;
-    const processName = targetOrder.process;
+    const processName = targetOrder.process || 'General';
 
-    if (oldRank === newRank) {
-      return this.findAll(undefined, undefined, processName);
+    // Fetch all orders for this process sorted by current rank
+    const orders = await this.ordersRepository
+      .createQueryBuilder('order')
+      .where(
+        'order.process = :process OR (:process = \'General\' AND (order.process IS NULL OR order.process = \'\'))',
+        { process: processName },
+      )
+      .orderBy('order.rank', 'ASC')
+      .addOrderBy('order.updatedAt', 'DESC')
+      .addOrderBy('order.id', 'ASC')
+      .getMany();
+
+    const targetIndex = orders.findIndex((o) => o.id === id);
+    if (targetIndex === -1) {
+      throw new NotFoundException(`Order with ID "${id}" not found in process list`);
     }
 
-    await this.dataSource.transaction(async (manager) => {
-      if (newRank < oldRank) {
-        // Moving UP (e.g. from 6 to 1): Shift intermediate ranks DOWN by +1
-        await manager
-          .createQueryBuilder()
-          .update(Order)
-          .set({ rank: () => '`rank` + 1' })
-          .where(
-            'process = :process AND rank >= :newRank AND rank < :oldRank AND id != :id',
-            {
-              process: processName,
-              newRank,
-              oldRank,
-              id,
-            },
-          )
-          .execute();
-      } else {
-        // Moving DOWN (e.g. from 1 to 4): Shift intermediate ranks UP by -1
-        await manager
-          .createQueryBuilder()
-          .update(Order)
-          .set({ rank: () => '`rank` - 1' })
-          .where(
-            'process = :process AND rank > :oldRank AND rank <= :newRank AND id != :id',
-            {
-              process: processName,
-              oldRank,
-              newRank,
-              id,
-            },
-          )
-          .execute();
-      }
+    // Remove target from current position
+    const [movedOrder] = orders.splice(targetIndex, 1);
 
-      // Assign the new rank to the target order
-      await manager.update(Order, id, { rank: newRank });
+    // Calculate insert position (clamped between 0 and orders.length)
+    const insertIndex = Math.max(0, Math.min(newRank - 1, orders.length));
+
+    // Insert at new position
+    orders.splice(insertIndex, 0, movedOrder);
+
+    // Save sequential ranks (1, 2, 3...) in a transaction
+    await this.dataSource.transaction(async (manager) => {
+      for (let i = 0; i < orders.length; i++) {
+        const expectedRank = i + 1;
+        if (orders[i].rank !== expectedRank) {
+          orders[i].rank = expectedRank;
+          await manager.update(Order, orders[i].id, { rank: expectedRank });
+        }
+      }
     });
 
     // Return the newly sorted order list for this process
@@ -150,10 +269,37 @@ export class OrdersService {
 
   async update(id: number, updateOrderDto: UpdateOrderDto): Promise<Order> {
     const order = await this.findOne(id);
+    const prevRank = order.rank;
+    const prevStatus = order.order_status;
+    const prevProcess = order.process;
 
-    if (updateOrderDto.rank && updateOrderDto.rank !== order.rank) {
+    if (
+      updateOrderDto.rank !== undefined &&
+      updateOrderDto.rank !== null &&
+      updateOrderDto.rank !== order.rank
+    ) {
       await this.updateRank(id, updateOrderDto.rank);
+      order.rank = updateOrderDto.rank;
       delete updateOrderDto.rank;
+    }
+
+    const isNowDispatched =
+      (updateOrderDto.process === 'DISPATCHED' || updateOrderDto.order_status === 'CLOSE') &&
+      prevStatus !== 'CLOSE' &&
+      prevProcess !== 'DISPATCHED';
+
+    if (isNowDispatched && prevRank > 0) {
+      await this.dataSource.transaction(async (manager) => {
+        await manager
+          .createQueryBuilder()
+          .update(Order)
+          .set({ rank: () => '`rank` - 1' })
+          .where(
+            "(order_status = 'OPEN' OR order_status IS NULL) AND rank > :prevRank",
+            { prevRank },
+          )
+          .execute();
+      });
     }
 
     Object.assign(order, updateOrderDto);
@@ -163,16 +309,20 @@ export class OrdersService {
   async remove(id: number): Promise<{ message: string }> {
     const order = await this.findOne(id);
     const { process, rank } = order;
+    const processName = process || 'General';
 
     await this.dataSource.transaction(async (manager) => {
-      await manager.remove(order);
+      await manager.update(Order, id, { order_status: 'DELETED' });
 
       // Normalize ranks: decrement ranks greater than deleted order's rank
       await manager
         .createQueryBuilder()
         .update(Order)
         .set({ rank: () => '`rank` - 1' })
-        .where('process = :process AND rank > :rank', { process, rank })
+        .where(
+          '(process = :process OR (:process = \'General\' AND (process IS NULL OR process = \'\'))) AND rank > :rank',
+          { process: processName, rank },
+        )
         .execute();
     });
 

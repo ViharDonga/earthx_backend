@@ -13,7 +13,8 @@ import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { UpdateRankDto } from './dto/update-rank.dto';
-import { Order, OrderStatus } from './entities/order.entity';
+import { ReorderOrdersDto } from './dto/reorder-orders.dto';
+import { Order } from './entities/order.entity';
 
 @Controller('orders')
 export class OrdersController {
@@ -29,21 +30,35 @@ export class OrdersController {
     @Query('companyId') companyId?: string,
     @Query('productId') productId?: string,
     @Query('process') process?: string,
-    @Query('status') status?: OrderStatus,
-  ): Promise<Order[]> {
+    @Query('order_status') order_status?: string,
+    ): Promise<Order[]> {
     const parsedCompanyId = companyId ? parseInt(companyId, 10) : undefined;
     const parsedProductId = productId ? parseInt(productId, 10) : undefined;
     return await this.ordersService.findAll(
       parsedCompanyId,
       parsedProductId,
       process,
-      status,
-    );
+      order_status,);
+  }
+
+  @Patch('reorder')
+  async reorder(@Body() reorderOrdersDto: ReorderOrdersDto): Promise<Order[]> {
+    return await this.ordersService.reorder(reorderOrdersDto);
   }
 
   @Get(':id')
   async findOne(@Param('id', ParseIntPipe) id: number): Promise<Order> {
     return await this.ordersService.findOne(id);
+  }
+
+  @Patch(':id/move-up')
+  async moveUp(@Param('id', ParseIntPipe) id: number): Promise<Order[]> {
+    return await this.ordersService.moveUp(id);
+  }
+
+  @Patch(':id/move-down')
+  async moveDown(@Param('id', ParseIntPipe) id: number): Promise<Order[]> {
+    return await this.ordersService.moveDown(id);
   }
 
   @Patch(':id/rank')

@@ -19,7 +19,8 @@ export class ProductsService {
 
   async findAll(companyId?: number): Promise<Product[]> {
     const query = this.productRepository.createQueryBuilder('product')
-      .leftJoinAndSelect('product.company', 'company');
+      .leftJoinAndSelect('product.company', 'company')
+      .where("product.status = 'OPEN' OR (product.status IS NULL AND product.isActive = true)");
 
     if (companyId) {
       query.where('product.companyId = :companyId', { companyId });
@@ -49,7 +50,9 @@ export class ProductsService {
 
   async remove(id: number): Promise<{ message: string }> {
     const product = await this.findOne(id);
-    await this.productRepository.remove(product);
+    product.status = 'CLOSE';
+    product.isActive = false;
+    await this.productRepository.save(product);
     return { message: `Product ID ${id} deleted successfully` };
   }
 }

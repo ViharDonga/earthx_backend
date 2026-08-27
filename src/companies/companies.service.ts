@@ -25,10 +25,12 @@ export class CompaniesService {
   }
 
   async findAll(): Promise<Company[]> {
-    return await this.companyRepository.find({
-      relations: ['products'],
-      order: { id: 'ASC' }, // 1, 2, 3...
-    });
+    return await this.companyRepository
+      .createQueryBuilder('company')
+      .leftJoinAndSelect('company.products', 'products')
+      .where("company.status = 'OPEN' OR (company.status IS NULL AND company.isActive = true)")
+      .orderBy('company.id', 'ASC')
+      .getMany();
   }
 
   async findOne(id: number): Promise<Company> {
@@ -50,7 +52,9 @@ export class CompaniesService {
 
   async remove(id: number): Promise<{ message: string }> {
     const company = await this.findOne(id);
-    await this.companyRepository.remove(company);
+    company.status = 'CLOSE';
+    company.isActive = false;
+    await this.companyRepository.save(company);
     return { message: `Company ID ${id} deleted successfully` };
   }
 }

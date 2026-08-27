@@ -35,6 +35,9 @@ export class Company {
   @Column({ default: true })
   isActive: boolean;
 
+  @Column({ length: 20, default: 'OPEN' })
+  status: string;
+
   @OneToMany(() => Product, (product) => product.company)
   products: Product[];
 

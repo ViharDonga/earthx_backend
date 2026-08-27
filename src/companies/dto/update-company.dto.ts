@@ -21,23 +21,22 @@ export class UpdateCompanyDto {
   @IsOptional()
   contactPerson?: string;
 
-  @IsString()
   @IsOptional()
+  @IsString()
   gstNumber?: string;
 
-  @IsString()
   @IsOptional()
+  @IsString()
   phone?: string;
 
-  @IsString()
   @IsOptional()
+  @IsString()
   address?: string;
 
   @IsBoolean()
-  @IsOptional()
   isActive?: boolean;
 
-  @IsOptional()
   @IsObject()
+  @IsOptional()
   addl_attr?: object;
 }

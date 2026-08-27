@@ -11,13 +11,7 @@ import {
 import { Company } from '../../companies/entities/company.entity';
 import { Product } from '../../products/entities/product.entity';
 
-export enum OrderStatus {
-  PENDING = 'PENDING',
-  IN_PROCESS = 'IN_PROCESS',
-  READY_TO_DISPATCH = 'READY_TO_DISPATCH',
-  DISPATCHED = 'DISPATCHED',
-  CANCELLED = 'CANCELLED',
-}
+
 
 @Entity('orders')
 @Index(['companyId', 'process', 'rank'])
@@ -55,15 +49,11 @@ export class Order {
   @Column({ type: 'int', default: 0 })
   quantity: number;
 
-  @Column({ length: 100, default: 'General' })
+  @Column({ length: 100, default: 'IN_PROCESS' })
   process: string;
 
-  @Column({
-    type: 'enum',
-    enum: OrderStatus,
-    default: OrderStatus.PENDING,
-  })
-  status: OrderStatus;
+  @Column({ length: 20, default: 'OPEN' })
+  order_status: string;
 
   @Column({ type: 'int', default: 1 })
   rank: number;

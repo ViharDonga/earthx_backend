@@ -47,6 +47,9 @@ export class Product {
   @Column({ default: true })
   isActive: boolean;
 
+  @Column({ length: 20, default: 'OPEN' })
+  status: string;
+
   @CreateDateColumn()
   createdAt: Date;
 

@@ -3,10 +3,8 @@ import {
   IsOptional,
   IsInt,
   Min,
-  IsEnum,
   IsObject,
 } from 'class-validator';
-import { OrderStatus } from '../entities/order.entity';
 
 export class UpdateOrderDto {
   @IsString()
@@ -21,7 +19,6 @@ export class UpdateOrderDto {
   @IsOptional()
   productId?: number;
 
-
   @IsInt()
   @Min(1)
   @IsOptional()
@@ -31,9 +28,9 @@ export class UpdateOrderDto {
   @IsOptional()
   process?: string;
 
-  @IsEnum(OrderStatus)
+  @IsString()
   @IsOptional()
-  status?: OrderStatus;
+  order_status?: string;
 
   @IsInt()
   @Min(1)
@@ -51,4 +48,5 @@ export class UpdateOrderDto {
   @IsOptional()
   @IsObject()
   addl_attr?: object;
+
 }
