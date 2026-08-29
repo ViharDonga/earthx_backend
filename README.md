@@ -60,24 +60,38 @@ Edit `.env` (or copy from `.env.example`):
 ```env
 PORT=3000
 
+# Local MySQL Database (used during development)
 DB_HOST=localhost
 DB_PORT=3306
 DB_USERNAME=root
-DB_PASSWORD=your_mysql_password
+DB_PASSWORD=your_local_mysql_password
 DB_DATABASE=earthx_db
 DB_SYNCHRONIZE=true
+
+# Production Database (used by npm run db:sync to fetch real data)
+PROD_DB_HOST=89.116.133.75
+PROD_DB_PORT=3306
+PROD_DB_USERNAME=your_prod_mysql_username
+PROD_DB_PASSWORD=your_prod_mysql_password
+PROD_DB_DATABASE=your_prod_mysql_database
 
 JWT_SECRET=earthx_super_secret_jwt_key_2026_change_in_production
 JWT_EXPIRES_IN=1d
 ```
 
-> **Note**: In MySQL, make sure the database `earthx_db` exists:
-> ```sql
-> CREATE DATABASE IF NOT EXISTS earthx_db;
-> ```
-> With `DB_SYNCHRONIZE=true`, TypeORM will automatically create the `users` table upon startup!
+### 2. Sync Production Data to Local Database (Optional / Testing)
 
-### 2. Install Dependencies
+To copy all tables and live data from your Production MySQL database into your local MySQL database for testing:
+
+```bash
+npm run db:sync
+# or
+npm run db:pull
+```
+
+> **Note**: This will create the local database if it doesn't exist, replicate all production tables, and copy all production rows into your local database.
+
+### 3. Install Dependencies
 
 ```bash
 cd earthx-backend
