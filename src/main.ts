@@ -10,11 +10,20 @@ async function bootstrap() {
   // Set global API prefix (e.g. /api/auth/login)
   app.setGlobalPrefix('api');
 
-  // Enable CORS for Angular frontend (or any client origin)
+  // Enable CORS for frontend clients
   app.enableCors({
-    origin: true,
+    origin: [
+      'https://earthxindia.com',
+      'https://www.earthxindia.com',
+      'https://api.earthxindia.com',
+      'http://localhost:4200',
+      'http://localhost:3000',
+    ],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
     credentials: true,
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
   });
 
   // Enable ValidationPipe for request DTO validation

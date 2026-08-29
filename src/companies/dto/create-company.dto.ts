@@ -12,7 +12,7 @@ export class CreateCompanyDto {
 
   @IsOptional()
   @IsEmail()
-  @Transform(({ value }) => value?.trim() || null)
+  @Transform(({ value }) => !value || value?.trim() == '-' || value?.trim() == '' ? null : value?.trim())
   email?: string;
 
   @IsString()
