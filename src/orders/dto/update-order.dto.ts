@@ -4,7 +4,9 @@ import {
   IsInt,
   Min,
   IsObject,
+  Allow,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class UpdateOrderDto {
   @IsString()
@@ -13,11 +15,27 @@ export class UpdateOrderDto {
 
   @IsInt()
   @IsOptional()
+  @Transform(({ obj }) => {
+    const raw = obj.companyId ?? obj.company_id;
+    return Number(raw);
+  })
   companyId?: number;
+
+  /** Alias so snake_case payloads are not rejected by ValidationPipe. */
+  @Allow()
+  company_id?: number;
 
   @IsInt()
   @IsOptional()
+  @Transform(({ obj }) => {
+    const raw = obj.productId ?? obj.product_id;
+    return Number(raw);
+  })
   productId?: number;
+
+  /** Alias so snake_case payloads are not rejected by ValidationPipe. */
+  @Allow()
+  product_id?: number;
 
   @IsInt()
   @Min(1)
@@ -25,7 +43,6 @@ export class UpdateOrderDto {
   quantity?: number;
 
   @IsString()
-  @IsOptional()
   process?: string;
 
   @IsString()
